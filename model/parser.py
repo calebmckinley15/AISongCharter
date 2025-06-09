@@ -3,99 +3,73 @@ import re
 import mido
 from mido import MidiFile, MidiTrack, Message
 
-def parse_chart(chart_path):
-    """Parses a .chart file and extracts BPM and note data."""
-    with open(chart_path, 'r', encoding='utf-8') as file:
-        lines = file.readlines()
 
-    bpm_changes = []
-    notes = []
-    resolution = 192  # Default tick resolution
-    tick_multiplier = resolution / 192  # Scales the chart's resolution properly
+def generate_chart(song_metadata, bpm_changes, notes, output_path):
+    """
+    Generates a .chart file for Clone Hero based on song metadata, BPM changes, and notes.
+    """
+    with open(output_path, 'w', encoding='utf-8') as chart_file:
+        # Write [Song] section
+        chart_file.write("[Song]\n")
+        chart_file.write(f"Name = {song_metadata['name']}\n")
+        chart_file.write(f"Artist = {song_metadata['artist']}\n")
+        chart_file.write(f"Offset = {song_metadata['offset']}\n")
+        chart_file.write(f"Resolution = {song_metadata['resolution']}\n")
+        chart_file.write("\n")
 
-    in_sync_track = False
-    in_expert_track = False
+        # Write [SyncTrack] section
+        chart_file.write("[SyncTrack]\n")
+        for tick, bpm in bpm_changes:
+            bpm_value = int(bpm * 1000)  # Convert BPM to Clone Hero format
+            chart_file.write(f"{tick} = B {bpm_value}\n")
+        chart_file.write("\n")
 
-    for line in lines:
-        line = line.strip()
+        # Write [ExpertSingle] section
+        chart_file.write("[ExpertSingle]\n")
+        for tick, note, length in notes:
+            chart_file.write(f"{tick} = N {note - 60} {length}\n")  # Convert MIDI pitch to Clone Hero note
+        chart_file.write("\n")
 
-        # Get resolution
-        if "Resolution =" in line:
-            resolution = int(re.findall(r'\d+', line)[0])
-            tick_multiplier = resolution / 192
-        
-        # Start SyncTrack (BPM changes)
-        if line == "[SyncTrack]":
-            in_sync_track = True
-            continue
-        if line.startswith("[") and line != "[SyncTrack]":
-            in_sync_track = False
+    print(f"✅ Successfully generated chart at '{output_path}'!")
 
-        # BPM Change
-        if in_sync_track and "= B " in line:
-            match = re.match(r"(\d+) = B (\d+)", line)
-            if match:
-                tick, bpm = map(int, match.groups())
-                bpm_changes.append((tick, bpm / 1000))  # Convert back from B * 1000
+def generate_song_ini(song_metadata, output_path):
+    """
+    Generates a song.ini file for Clone Hero based on song metadata.
+    """
+    with open(output_path, 'w', encoding='utf-8') as ini_file:
+        ini_file.write("[Song]\n")
+        ini_file.write(f"Name = {song_metadata['name']}\n")
+        ini_file.write(f"Artist = {song_metadata['artist']}\n")
+        ini_file.write(f"Offset = {song_metadata['offset']}\n")
+        ini_file.write(f"Resolution = {song_metadata['resolution']}\n")
+        ini_file.write("MusicStream = song.ogg\n")  # Reference the audio file
+    print(f"✅ Successfully generated song.ini at '{output_path}'!")
 
-        # Start Expert Guitar Track
-        if line == "[ExpertSingle]":
-            in_expert_track = True
-            continue
-        if line.startswith("[") and line != "[ExpertSingle]":
-            in_expert_track = False
-
-        # Notes Parsing
-        if in_expert_track and "N " in line:
-            match = re.match(r"(\d+) = N (\d+) (\d+)", line)
-            if match:
-                tick, note, length = map(int, match.groups())
-                note_midi = 60 + note  # Convert to MIDI pitch (Middle C = 60)
-                notes.append((tick, note_midi, length))
-
-    return bpm_changes, notes, resolution
-
-def chart_to_midi(chart_path, midi_output):
-    """Converts .chart data to MIDI format and saves it."""
-    bpm_changes, notes, resolution = parse_chart(chart_path)
-
-    mid = MidiFile()
-    track = MidiTrack()
-    mid.tracks.append(track)
-
-    # Set default tempo (first BPM change)
-    if bpm_changes:
-        first_tick, first_bpm = bpm_changes[0]
-        tempo = mido.bpm2tempo(first_bpm)
-        track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=first_tick))
-
-    # Add BPM changes
-    for tick, bpm in bpm_changes:
-        tempo = mido.bpm2tempo(bpm)
-        track.append(mido.MetaMessage('set_tempo', tempo=tempo, time=tick))
-
-    # Add Notes
-    for tick, note, length in notes:
-        track.append(Message('note_on', note=note, velocity=64, time=tick))
-        track.append(Message('note_off', note=note, velocity=64, time=tick + length))
-
-    # Save MIDI file
-    mid.save(midi_output)
-    print(f"✅ Successfully converted '{chart_path}' to '{midi_output}'!")
-
-def process_directory(input_directory, output_directory):
-    """Processes all .chart files in a directory and converts them to .mid files."""
+def process_song(song_path, output_directory, bpm_changes, notes):
+    """
+    Processes a song input and generates a .chart file and song.ini file.
+    """
     if not os.path.exists(output_directory):
         os.makedirs(output_directory)
 
-    for file in os.listdir(input_directory):
-        if file.endswith(".chart"):
-            chart_path = os.path.join(input_directory, file)
-            midi_output = os.path.join(output_directory, file.replace(".chart", ".mid"))
-            chart_to_midi(chart_path, midi_output)
+    # Song metadata
+    song_metadata = {
+        "name": os.path.basename(song_path).replace(".ogg", ""),
+        "artist": "Unknown Artist",  # Replace with actual artist if available
+        "offset": "0",  # Replace with actual offset if available
+        "resolution": "192"
+    }
+
+    # Generate .chart file
+    chart_output = os.path.join(output_directory, song_metadata['name'] + ".chart")
+    generate_chart(song_metadata, bpm_changes, notes, chart_output)
+
+    # Generate song.ini file
+    ini_output = os.path.join(output_directory, "song.ini")
+    generate_song_ini(song_metadata, ini_output)
+
+    print(f"✅ Successfully processed song '{song_path}'!")
 
 input_dir = "charts"
 output_dir = "midis"  
-
-process_directory(input_dir, output_dir)
 
